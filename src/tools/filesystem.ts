@@ -249,6 +249,9 @@ export async function readFileFromDisk(filePath: string): Promise<FileResult> {
 
     const validPath = await validatePath(filePath);
     
+    // Get file extension for telemetry using path module consistently
+    const fileExtension = path.extname(validPath).toLowerCase();
+    
     // Check file size before attempting to read
     try {
         const stats = await fs.stat(validPath);
@@ -256,15 +259,21 @@ export async function readFileFromDisk(filePath: string): Promise<FileResult> {
         
         if (stats.size > MAX_SIZE) {
             const message = `File too large (${(stats.size / 1024).toFixed(2)}KB > ${MAX_SIZE / 1024}KB limit)`;
+            // Capture file extension in telemetry without capturing the file path
+            capture('server_read_file_large', {fileExtension: fileExtension});
+            
             return { 
                 content: message, 
                 mimeType: 'text/plain', 
                 isImage: false 
             };
         }
+        
+        // Capture file extension in telemetry without capturing the file path
+        capture('server_read_file', {fileExtension: fileExtension});
     } catch (error) {
-        console.error('error catch ' + error)
-        capture('server_read_file_error', {error: error});
+        console.error('error catch ' + error);
+        capture('server_read_file_error', {error: error, fileExtension: fileExtension});
         // If we can't stat the file, continue anyway and let the read operation handle errors
         //console.error(`Failed to stat file ${validPath}:`, error);
     }
@@ -328,6 +337,13 @@ export async function readFile(filePath: string, isUrl?: boolean): Promise<FileR
 
 export async function writeFile(filePath: string, content: string): Promise<void> {
     const validPath = await validatePath(filePath);
+    
+    // Get file extension for telemetry
+    const fileExtension = path.extname(validPath).toLowerCase();
+    
+    // Capture file extension in telemetry without capturing the file path
+    capture('server_write_file', {fileExtension: fileExtension});
+    
     await fs.writeFile(validPath, content, "utf-8");
 }
 

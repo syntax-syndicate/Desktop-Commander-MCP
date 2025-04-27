@@ -1,6 +1,7 @@
 import { platform } from 'os';
-import { createHash } from 'crypto';
+import { randomUUID } from 'crypto';
 import * as https from 'https';
+import { configManager } from './config-manager.js';
 
 let VERSION = 'unknown';
 try {
@@ -15,29 +16,26 @@ const GA_MEASUREMENT_ID = 'G-NGGDNL0K4L'; // Replace with your GA4 Measurement I
 const GA_API_SECRET = '5M0mC--2S_6t94m8WrI60A'; // Replace with your GA4 API Secret
 const GA_BASE_URL = `https://www.google-analytics.com/mp/collect?measurement_id=${GA_MEASUREMENT_ID}&api_secret=${GA_API_SECRET}`;
 
-// Set default tracking state
-const isTrackingEnabled = true;
+// Will be initialized when needed
 let uniqueUserId = 'unknown';
 
-// Try to generate a unique user ID without breaking if dependencies aren't available
-try {
-
-    // Dynamic import to prevent crashing if dependency isn't available
-    import('node-machine-id').then((machineIdModule) => {
-        // Access the default export from the module
-        uniqueUserId = machineIdModule.default.machineIdSync();
-
-    }).catch(() => {
-        // Fallback to a semi-random ID if machine-id isn't available
-        uniqueUserId = createHash('sha256')
-            .update(`${platform()}-${process.env.USER || process.env.USERNAME || 'user'}-${Date.now()}`)
-            .digest('hex');
-    });
-} catch {
-    // Fallback to a semi-random ID if import fails
-    uniqueUserId = createHash('sha256')
-        .update(`${platform()}-${process.env.USER || process.env.USERNAME || 'user'}-${Date.now()}`)
-        .digest('hex');
+// Function to get or create a persistent UUID
+async function getOrCreateUUID(): Promise<string> {
+    try {
+        // Try to get the UUID from the config
+        let clientId = await configManager.getValue('clientId');
+        
+        // If it doesn't exist, create a new one and save it
+        if (!clientId) {
+            clientId = randomUUID();
+            await configManager.setValue('clientId', clientId);
+        }
+        
+        return clientId;
+    } catch (error) {
+        // Fallback to a random UUID if config operations fail
+        return randomUUID();
+    }
 }
 
 /**
@@ -45,12 +43,21 @@ try {
  * @param event Event name
  * @param properties Optional event properties
  */
-export const capture = (event: string, properties?: any) => {
-    if (!isTrackingEnabled || !GA_MEASUREMENT_ID || !GA_API_SECRET) {
-        return;
-    }
-    
+export const capture = async (event: string, properties?: any) => {
     try {
+        // Check if telemetry is enabled in config (defaults to true if not set)
+        const telemetryEnabled = await configManager.getValue('telemetryEnabled');
+        
+        // If telemetry is explicitly disabled or GA credentials are missing, don't send
+        if (telemetryEnabled === false || !GA_MEASUREMENT_ID || !GA_API_SECRET) {
+            return;
+        }
+        
+        // Get or create the client ID if not already initialized
+        if (uniqueUserId === 'unknown') {
+            uniqueUserId = await getOrCreateUUID();
+        }
+        
         // Prepare standard properties
         const baseProperties = {
             timestamp: new Date().toISOString(),
@@ -118,7 +125,6 @@ export const capture = (event: string, properties?: any) => {
     } catch {
         // Silently fail - we don't want analytics issues to break functionality
     }
-
 };
 
 
